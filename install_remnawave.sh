@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Проверка на root права
 if [ "$(id -u)" -ne 0 ]; then
     echo "Ошибка: Этот скрипт должен быть запущен от имени root (sudo)"
     exit 1
@@ -7,29 +8,31 @@ fi
 
 clear
 
+# Определение цветов для вывода
 BOLD_BLUE=$(tput setaf 4)
 BOLD_GREEN=$(tput setaf 2)
 LIGHT_GREEN=$(tput setaf 10)
 BOLD_BLUE_MENU=$(tput setaf 6)
 ORANGE=$(tput setaf 3)
 BOLD_RED=$(tput setaf 1)
-PURPLE=$(tput setaf 5)
 BLUE=$(tput setaf 6)
 GREEN=$(tput setaf 2)
 YELLOW=$(tput setaf 3)
 NC=$(tput sgr0)
 
-check_internet() {
-    echo -ne "${BOLD_BLUE_MENU}Проверка подключения к интернету... ${NC}"
-    if ping -c 1 google.com &>/dev/null; then
-        echo -e "${BOLD_GREEN}Подключено${NC}"
-        return 0
-    else
-        echo -e "${BOLD_RED}Не подключено${NC}"
-        return 1
-    fi
-}
+# Версия скрипта
+VERSION="V0.3"
 
+# Основные директории
+REMNAWAVE_DIR="$HOME/remnawave"
+REMNANODE_DIR="$HOME/remnanode"
+SELFSTEAL_DIR="$HOME/selfsteal"
+
+# ===================================================================================
+#                              ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ===================================================================================
+
+# Проверка и установка утилиты make
 check_and_install_make() {
     if ! command -v make &> /dev/null; then
         echo -e "${GREEN}Установка утилиты make...${NC}"
@@ -44,171 +47,153 @@ check_and_install_make() {
     return 0
 }
 
+# Отрисовка информационного блока
 draw_info_box() {
     local title="$1"
     local subtitle="$2"
     
-    # Fixed width box with perfect alignment
+    # Фиксированная ширина блока для идеального выравнивания
     local width=54
     
     echo -e "${BOLD_GREEN}"
-    # Top border
+    # Верхняя граница
     printf "┌%s┐\n" "$(printf '─%.0s' $(seq 1 $width))"
     
-    # Center title
+    # Центрирование заголовка
     local title_padding_left=$(( (width - ${#title}) / 2 ))
     local title_padding_right=$(( width - title_padding_left - ${#title} ))
     printf "│%*s%s%*s│\n" "$title_padding_left" "" "$title" "$title_padding_right" ""
     
-    # Center subtitle
+    # Центрирование подзаголовка
     local subtitle_padding_left=$(( (width - ${#subtitle}) / 2 ))
     local subtitle_padding_right=$(( width - subtitle_padding_left - ${#subtitle} ))
     printf "│%*s%s%*s│\n" "$subtitle_padding_left" "" "$subtitle" "$subtitle_padding_right" ""
     
-    # Empty line
+    # Пустая строка
     printf "│%*s│\n" "$width" ""
     
-    # Version line - carefully handle colors
+    # Строка версии - аккуратная обработка цветов
     local version_text="  • Версия: "
-    local version_value="V0.2 (Бета)"
+    local version_value="$VERSION (Бета)"
     local version_value_colored="${ORANGE}${version_value}${BOLD_GREEN}"
     local version_value_length=${#version_value}
     local remaining_space=$(( width - ${#version_text} - version_value_length ))
     printf "│%s%s%*s│\n" "$version_text" "$version_value_colored" "$remaining_space" ""
     
-    # Empty line
+    # Пустая строка
     printf "│%*s│\n" "$width" ""
     
-    # Bottom border
+    # Нижняя граница
     printf "└%s┘\n" "$(printf '─%.0s' $(seq 1 $width))"
     echo -e "${NC}"
 }
 
-animate_text() {
-    local text="$1"
-    local speed="${2:-0.01}"
-    for (( i=0; i<${#text}; i++ )); do
-        echo -ne "${text:$i:1}"
-        sleep $speed
-    done
-    echo ""
-}
-
-exiting_animation() {
-    echo -e "Готово."
-}
-
-show_installing_animation() {
-    local pid=$!
-    local messages=(
-        "${ORANGE}Установка необходимых пакетов.${NC}"
-        "${ORANGE}Установка необходимых пакетов..${NC}"
-        "${ORANGE}Установка необходимых пакетов...${NC}"
-    )
-    local i=0
-    while kill -0 $pid 2>/dev/null; do
-        echo -ne "\r${messages[$i]}"
-        i=$(( (i+1) % 3 ))
-        sleep 0.5
-    done
-    echo -ne "\r\033[K"
-}
-
-show_setup_animation() {
-    local pid=$!
-    local messages=(
-        "${BLUE}Скрипт выполняет необходимые задачи.${NC}"
-        "${BLUE}Скрипт выполняет необходимые задачи..${NC}"
-        "${BLUE}Скрипт выполняет необходимые задачи...${NC}"
-    )
-    local i=0
-    while kill -0 $pid 2>/dev/null; do
-        echo -ne "\r${messages[$i]}"
-        i=$(( (i+1) % 3 ))
-        sleep 0.5
-    done
-    echo -ne "\r\033[K"
-}
-
-validate_numeric_port() {
-    local port="$1"
-    if [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-install_dependencies() {
-    (
-        sudo apt update -y > /dev/null 2>&1
-        
-        # Check if Docker is already installed
-        if command -v docker &> /dev/null && docker --version &> /dev/null; then
-            echo ""
-            echo -e "${GREEN}Docker уже установлен. Пропускаем установку Docker.${NC}"
-        else
-            echo ""
-            echo -e "${GREEN}Установка Docker и других необходимых пакетов...${NC}"
-
-            # Установка предварительных зависимостей
-            sudo apt install -y apt-transport-https ca-certificates curl software-properties-common make > /dev/null 2>&1
-
-            # Создание директории для хранения ключей
-            sudo mkdir -p /etc/apt/keyrings
-
-            # Добавление официального GPG-ключа Docker
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg 2>/dev/null || {
-                # If the above fails, try removing the file first and then adding the key
-                sudo rm -f /etc/apt/keyrings/docker.gpg
-                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
-            }
-
-            # Настройка прав доступа к ключу
-            sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-            # Определение кодового имени дистрибутива
-            CODENAME=$(lsb_release -cs)
-
-            # Добавление репозитория Docker
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-            # Обновление списка пакетов
-            sudo apt update -y > /dev/null 2>&1
-
-            # Установка Docker Engine и Docker Compose plugin
-            sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin > /dev/null 2>&1
-
-            # Добавление текущего пользователя в группу docker (чтобы использовать Docker без sudo)
-            sudo usermod -aG docker $USER
-
-            # Проверка успешности установки
-            if command -v docker &> /dev/null; then
-                echo -e "${GREEN}Docker успешно установлен$(docker --version)${NC}"
-            else
-                echo -e "${RED}Ошибка установки Docker${NC}"
-                exit 1
-            fi
-        fi
-        
-        # Verify docker is working
-        docker --version > /dev/null 2>&1
-    ) & show_installing_animation
+# Генерация надежного пароля
+generate_secure_password() {
+    local length=${1:-16}
+    local chars='a-zA-Z0-9!@#$%^&*()_+{}[]|:;<>,.?/~'
     
-    wait $!
+    # Принудительно добавляем минимум один спецсимвол
+    local special_chars='!@#$%^&*()_+{}[]|:;<>,.?/~'
+    local special_char=$(echo "$special_chars" | fold -w1 | shuf | head -n1)
+    
+    if command -v openssl &> /dev/null; then
+        password=$(openssl rand -base64 $((length * 3/4)) | tr -dc "$chars" | head -c $((length-1)))
+    elif command -v tr &> /dev/null && command -v head &> /dev/null; then
+        password=$(head -c100 /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+    else
+        password=$(cat /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+    fi
+    
+    # Добавляем спецсимвол в случайную позицию
+    position=$((RANDOM % length))
+    password="${password:0:$position}${special_char}${password:$position}"
+    
+    echo "${password:0:$length}"
+}
+
+# Установка общих зависимостей для всех компонентов
+install_dependencies() {
+    echo -e "${GREEN}Проверка зависимостей...${NC}"
+    sudo apt update -y > /dev/null 2>&1
+    
+    # Проверка, установлен ли Docker
+    if command -v docker &> /dev/null && docker --version &> /dev/null; then
+        echo -e "${GREEN}Docker уже установлен. Пропускаем установку Docker.${NC}"
+    else
+        echo ""
+        echo -e "${GREEN}Установка Docker и других необходимых пакетов...${NC}"
+
+        # Установка предварительных зависимостей
+        sudo apt install -y apt-transport-https ca-certificates curl software-properties-common make > /dev/null 2>&1
+
+        # Создание директории для хранения ключей
+        sudo mkdir -p /etc/apt/keyrings
+
+        # Добавление официального GPG-ключа Docker
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg 2>/dev/null || {
+            # Если не удалось, пробуем удалить файл и добавить ключ снова
+            sudo rm -f /etc/apt/keyrings/docker.gpg
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
+        }
+
+        # Настройка прав доступа к ключу
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+        # Определение кодового имени дистрибутива
+        CODENAME=$(lsb_release -cs)
+
+        # Добавление репозитория Docker
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+        # Обновление списка пакетов
+        sudo apt update -y > /dev/null 2>&1
+
+        # Установка Docker Engine и Docker Compose plugin
+        sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin > /dev/null 2>&1
+
+        # Добавление текущего пользователя в группу docker (чтобы использовать Docker без sudo)
+        sudo usermod -aG docker $USER
+
+        # Проверка успешности установки
+        if command -v docker &> /dev/null; then
+            echo -e "${GREEN}Docker успешно установлен$(docker --version)${NC}"
+        else
+            echo -e "${RED}Ошибка установки Docker${NC}"
+            exit 1
+        fi
+    fi
+    
+    # Проверка работы docker
+    docker --version > /dev/null 2>&1
     
     echo -e "${GREEN}Пакеты успешно установлены.${NC}"
     sleep 2
 }
 
+# Создание общего Makefile для управления сервисами
+create_makefile() {
+    local directory="$1"
+    cat > "$directory/Makefile" << 'EOF'
+.PHONY: start stop restart logs
+
+start:
+	docker compose up -d && docker compose logs -f -t
+stop:
+	docker compose down
+restart:
+	docker compose down && docker compose up -d
+logs:
+	docker compose logs -f -t
+EOF
+}
+
+# ===================================================================================
+#                              УСТАНОВКА ПАНЕЛИ REMNAWAVE
+# ===================================================================================
+
 install_panel() {
     clear
-    
-    check_internet || {
-        echo -e "${BOLD_RED}Ошибка: Для установки требуется подключение к интернету.${NC}"
-        sleep 2
-        return 1
-    }
     
     check_and_install_make || {
         echo -e "${BOLD_RED}Ошибка: Для установки требуется утилита make. Пожалуйста, установите его вручную.${NC}"
@@ -220,67 +205,40 @@ install_panel() {
     install_dependencies
     
     # Создаем базовую директорию для всего проекта
-    mkdir -p ~/remnawave && cd ~/remnawave
-    
-    # Создаем директорию для панели
-    mkdir -p panel && mkdir -p caddy
+    mkdir -p $REMNAWAVE_DIR/{panel,caddy}
     
     # Переходим в директорию панели
-    cd panel
+    cd $REMNAWAVE_DIR/panel
     
-    # Генерация JWT секретов с помощью openssl вместо Python
+    # Генерация JWT секретов с помощью openssl
     JWT_AUTH_SECRET=$(openssl rand -hex 32 | tr -d '\n')
     JWT_API_TOKENS_SECRET=$(openssl rand -hex 32 | tr -d '\n')
     
-    (
-        curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/main/.env.sample
-    ) & show_setup_animation
+    curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/main/.env.sample
     
-    # Ask if Telegram integration should be enabled
+    # Спрашиваем, нужна ли интеграция с Telegram
     echo -ne "${GREEN}Хотите включить интеграцию с Telegram? (y/n): ${NC}"
     read IS_TELEGRAM_ENABLED
     IS_TELEGRAM_ENABLED=$(echo "$IS_TELEGRAM_ENABLED" | tr '[:upper:]' '[:lower:]')
     echo
     
-    # Convert y/n to true/false for the .env file
+    # Преобразование y/n в true/false для файла .env
     if [ "$IS_TELEGRAM_ENABLED" = "y" ] || [ "$IS_TELEGRAM_ENABLED" = "yes" ]; then
         IS_TELEGRAM_ENV_VALUE="true"
-        echo -e "${BOLD_GREEN}Включение интеграции с Telegram...${NC}"
-        # If Telegram integration is enabled, prompt for Telegram parameters
-        while true; do
-            echo -ne "${ORANGE}Введите токен вашего Telegram бота: ${NC}"
-            read TELEGRAM_BOT_TOKEN
-            echo
-            if validate_telegram_token "$TELEGRAM_BOT_TOKEN"; then
-                break
-            else
-                echo -e "${BOLD_RED}Ошибка: Неверный формат токена Telegram бота. Он должен выглядеть как '123456789:ABCdef...'.${NC}"
-            fi
-        done
+        # Если интеграция с Telegram включена, запрашиваем параметры
+        echo -ne "${ORANGE}Введите токен вашего Telegram бота: ${NC}"
+        read TELEGRAM_BOT_TOKEN
+        echo
         
-        while true; do
-            echo -ne "${ORANGE}Введите ID администратора Telegram: ${NC}"
-            read TELEGRAM_ADMIN_ID
-            echo
-            if validate_numeric_id "$TELEGRAM_ADMIN_ID"; then
-                break
-            else
-                echo -e "${BOLD_RED}Ошибка: ID администратора должен быть числовым значением.${NC}"
-            fi
-        done
+        echo -ne "${ORANGE}Введите ID администратора Telegram: ${NC}"
+        read TELEGRAM_ADMIN_ID
+        echo
         
-        while true; do
-            echo -ne "${ORANGE}Введите ID чата для уведомлений: ${NC}"
-            read NODES_NOTIFY_CHAT_ID
-            echo
-            if validate_numeric_id "$NODES_NOTIFY_CHAT_ID"; then
-                break
-            else
-                echo -e "${BOLD_RED}Ошибка: ID чата должен быть числовым значением.${NC}"
-            fi
-        done
+        echo -ne "${ORANGE}Введите ID чата для уведомлений: ${NC}"
+        read NODES_NOTIFY_CHAT_ID
+        echo
     else
-        # If Telegram integration is not enabled, set parameters to "change-me"
+        # Если интеграция с Telegram не включена, устанавливаем параметры в "change-me"
         IS_TELEGRAM_ENV_VALUE="false"
         echo -e "${BOLD_YELLOW}Пропуск интеграции с Telegram.${NC}"
         TELEGRAM_BOT_TOKEN="change-me"
@@ -288,20 +246,20 @@ install_panel() {
         NODES_NOTIFY_CHAT_ID="change-me"
     fi
     
-    echo -ne "${PURPLE}Введите домен для поддержки (для отображения в клиентском приложении) (например, support.example.com): ${NC}"
+    echo -ne "${ORANGE}Введите домен для поддержки (для отображения в клиентском приложении) (например, support.example.com): ${NC}"
     read SUB_SUPPORT_DOMAIN
     echo
     
-    echo -ne "${PURPLE}Введите домен для веб-страницы (для отображения в клиентском приложении) (например, webpage.example.com): ${NC}"
+    echo -ne "${ORANGE}Введите домен для веб-страницы (для отображения в клиентском приложении) (например, webpage.example.com): ${NC}"
     read SUB_WEBPAGE_DOMAIN
     echo
     
     # Запрашиваем основной домен для панели и домен для подписок
-    echo -ne "${PURPLE}Введите основной домен для вашей панели (например, panel.example.com): ${NC}"
+    echo -ne "${ORANGE}Введите основной домен для вашей панели (например, panel.example.com): ${NC}"
     read SCRIPT_PANEL_DOMAIN
     echo
     
-    echo -ne "${PURPLE}Введите домен для подписок (например, subs.example.com): ${NC}"
+    echo -ne "${ORANGE}Введите домен для подписок (например, subs.example.com): ${NC}"
     read SCRIPT_SUB_DOMAIN
     echo
     
@@ -312,15 +270,22 @@ install_panel() {
     echo
     
     echo -e "${BOLD_RED}\033[1m┌────────────────────────────────────────────┐\033[0m${NC}"
-    echo -e "${BOLD_RED}\033[1m│     Используете только сложный пароль!     │\033[0m${NC}"
+    echo -e "${BOLD_RED}\033[1m│     Выберите способ создания пароля:       │\033[0m${NC}"
     echo -e "${BOLD_RED}\033[1m└────────────────────────────────────────────┘\033[0m${NC}"
+    echo
+    echo -e "${ORANGE}1. Ввести пароль вручную${NC}"
+    echo -e "${ORANGE}2. Автоматически сгенерировать надежный пароль${NC}"
+    echo
+    echo -ne "${GREEN}Выберите опцию (1-2): ${NC}"
+    read password_option
     echo
     
     echo -ne "${ORANGE}Пожалуйста, введите имя пользователя SuperAdmin: ${NC}"
     read SUPERADMIN_USERNAME
     echo
     
-    while true; do
+    if [ "$password_option" = "1" ]; then
+        # Ручной ввод пароля
         echo -ne "${ORANGE}Введите пароль SuperAdmin: ${NC}"
         stty -echo
         read PASSWORD1
@@ -335,25 +300,29 @@ install_panel() {
         
         if [ "$PASSWORD1" = "$PASSWORD2" ]; then
             SUPERADMIN_PASSWORD=$PASSWORD1
-            break
         else
-            echo -e "${BOLD_RED}Пароли не совпадают. Пожалуйста, попробуйте снова.${NC}"
+            echo -e "${BOLD_RED}Пароли не совпадают. Будет использован первый введенный пароль.${NC}"
+            SUPERADMIN_PASSWORD=$PASSWORD1
         fi
-    done
+    else
+        # Автоматическая генерация пароля
+        SUPERADMIN_PASSWORD=$(generate_secure_password 16)
+        echo -e "${BOLD_GREEN}Сгенерирован надежный пароль: ${BOLD_RED}$SUPERADMIN_PASSWORD${NC}"
+        echo -e "${ORANGE}Обязательно сохраните этот пароль в надежном месте!${NC}"
+        echo
+    fi
     
-    (
-        sed -i "s|JWT_AUTH_SECRET=change_me|JWT_AUTH_SECRET=$JWT_AUTH_SECRET|" .env
-        sed -i "s|JWT_API_TOKENS_SECRET=change_me|JWT_API_TOKENS_SECRET=$JWT_API_TOKENS_SECRET|" .env
-        sed -i "s|IS_TELEGRAM_ENABLED=false|IS_TELEGRAM_ENABLED=$IS_TELEGRAM_ENV_VALUE|" .env
-        sed -i "s|TELEGRAM_BOT_TOKEN=change_me|TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN|" .env
-        sed -i "s|TELEGRAM_ADMIN_ID=change_me|TELEGRAM_ADMIN_ID=$TELEGRAM_ADMIN_ID|" .env
-        sed -i "s|NODES_NOTIFY_CHAT_ID=change_me|NODES_NOTIFY_CHAT_ID=$NODES_NOTIFY_CHAT_ID|" .env
-        sed -i "s|SUB_SUPPORT_URL=https://support.example.com|SUB_SUPPORT_URL=https://$SUB_SUPPORT_DOMAIN|" .env
-        sed -i "s|SUB_WEBPAGE_URL=https://example.com|SUB_WEBPAGE_URL=https://$SUB_WEBPAGE_DOMAIN|" .env
-        sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
-        sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
-        sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
-    ) & show_setup_animation
+    sed -i "s|JWT_AUTH_SECRET=change_me|JWT_AUTH_SECRET=$JWT_AUTH_SECRET|" .env
+    sed -i "s|JWT_API_TOKENS_SECRET=change_me|JWT_API_TOKENS_SECRET=$JWT_API_TOKENS_SECRET|" .env
+    sed -i "s|IS_TELEGRAM_ENABLED=false|IS_TELEGRAM_ENABLED=$IS_TELEGRAM_ENV_VALUE|" .env
+    sed -i "s|TELEGRAM_BOT_TOKEN=change_me|TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN|" .env
+    sed -i "s|TELEGRAM_ADMIN_ID=change_me|TELEGRAM_ADMIN_ID=$TELEGRAM_ADMIN_ID|" .env
+    sed -i "s|NODES_NOTIFY_CHAT_ID=change_me|NODES_NOTIFY_CHAT_ID=$NODES_NOTIFY_CHAT_ID|" .env
+    sed -i "s|SUB_SUPPORT_URL=https://support.example.com|SUB_SUPPORT_URL=https://$SUB_SUPPORT_DOMAIN|" .env
+    sed -i "s|SUB_WEBPAGE_URL=https://example.com|SUB_WEBPAGE_URL=https://$SUB_WEBPAGE_DOMAIN|" .env
+    sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
+    sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
+    sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
     
     echo -e "${GREEN}Файл .env успешно настроен.${NC}"
     sleep 3
@@ -410,35 +379,22 @@ volumes:
         name: remnawave-db-data
 EOF
 
-    # Создание Makefile для панели
-    cat > Makefile << 'EOF'
-.PHONY: start stop restart logs
-
-start:
-	docker compose up -d && docker compose logs -f -t
-stop:
-	docker compose down
-restart:
-	docker compose down && docker compose up -d
-logs:
-	docker compose logs -f -t
-EOF
+    # Создаем Makefile
+    create_makefile "$REMNAWAVE_DIR/panel"
     
     # Установка remnawave-json, если пользователь согласился
     if [ "$INSTALL_REMNAWAVE_JSON" = "y" ] || [ "$INSTALL_REMNAWAVE_JSON" = "yes" ]; then
         echo -e "${BOLD_GREEN}Установка remnawave-json...${NC}"
         
         # Создаем директорию для remnawave-json
-        mkdir -p ~/remnawave/remnawave-json/templates/v2ray
-        mkdir -p ~/remnawave/remnawave-json/templates/mux
-        mkdir -p ~/remnawave/remnawave-json/templates/subscription
+        mkdir -p $REMNAWAVE_DIR/remnawave-json/templates/{v2ray,mux,subscription}
         
         # Скачиваем шаблоны
-        curl -s -o ~/remnawave/remnawave-json/templates/v2ray/default.json https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/v2ray/default.json
-        curl -s -o ~/remnawave/remnawave-json/templates/mux/default.json https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/mux/default.json
-        curl -s -o ~/remnawave/remnawave-json/templates/subscription/index.html https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/subscription/index.html
+        curl -s -o $REMNAWAVE_DIR/remnawave-json/templates/v2ray/default.json https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/v2ray/default.json
+        curl -s -o $REMNAWAVE_DIR/remnawave-json/templates/mux/default.json https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/mux/default.json
+        curl -s -o $REMNAWAVE_DIR/remnawave-json/templates/subscription/index.html https://raw.githubusercontent.com/Jolymmiles/remnawave-json/refs/heads/main/templates/subscription/index.html
         
-        cd ~/remnawave/remnawave-json
+        cd $REMNAWAVE_DIR/remnawave-json
         
         # Устанавливаем APP_PORT по умолчанию
         APP_PORT=4000
@@ -448,19 +404,19 @@ EOF
         # Информация о шаблонах
         echo -e ""
         echo -e "${ORANGE}Все шаблоны будут доступны по следующим путям на хост-системе:${NC}"
-        echo -e "${ORANGE}- Шаблон V2Ray: ~/remnawave/remnawave-json/templates/v2ray/default.json${NC}"
-        echo -e "${ORANGE}- Шаблон V2Ray Mux: ~/remnawave/remnawave-json/templates/mux/default.json${NC}"
-        echo -e "${ORANGE}- Шаблон страницы подписки: ~/remnawave/remnawave-json/templates/subscription/index.html${NC}"
+        echo -e "${ORANGE}- Шаблон V2Ray: $REMNAWAVE_DIR/remnawave-json/templates/v2ray/default.json${NC}"
+        echo -e "${ORANGE}- Шаблон V2Ray Mux: $REMNAWAVE_DIR/remnawave-json/templates/mux/default.json${NC}"
+        echo -e "${ORANGE}- Шаблон страницы подписки: $REMNAWAVE_DIR/remnawave-json/templates/subscription/index.html${NC}"
         echo -e ""
         echo -e "${ORANGE}Если вы захотите изменить шаблоны в будущем:${NC}"
         echo -e ""
-        echo -e "${ORANGE}1. Перейдите в директорию ~/remnawave/remnawave-json и выполните: make stop${NC}"
+        echo -e "${ORANGE}1. Перейдите в директорию $REMNAWAVE_DIR/remnawave-json и выполните: make stop${NC}"
         echo -e "${ORANGE}2. Измените нужные файлы шаблонов по указанным выше путям${NC}"
         echo -e "${ORANGE}3. Запустите сервисы снова: make start${NC}"
         echo -e ""
         
         # Устанавливаем стандартные пути к шаблонам
-        V2RAY_TEMPLATE_HOST_PATH="~/remnawave/remnawave-json/templates/v2ray/default.json"
+        V2RAY_TEMPLATE_HOST_PATH="$REMNAWAVE_DIR/remnawave-json/templates/v2ray/default.json"
         V2RAY_TEMPLATE_PATH_LINE="V2RAY_TEMPLATE_PATH=/app/templates/v2ray/default.json"
         
         # V2RAY_MUX_ENABLED
@@ -473,10 +429,10 @@ EOF
             V2RAY_MUX_ENABLED_LINE="V2RAY_MUX_ENABLED=true"
         fi
         
-        V2RAY_MUX_TEMPLATE_HOST_PATH="~/remnawave/remnawave-json/templates/mux/default.json"
+        V2RAY_MUX_TEMPLATE_HOST_PATH="$REMNAWAVE_DIR/remnawave-json/templates/mux/default.json"
         V2RAY_MUX_TEMPLATE_PATH_LINE="V2RAY_MUX_TEMPLATE_PATH=/app/templates/v2ray/mux_default.json"
         
-        WEB_PAGE_TEMPLATE_HOST_PATH="~/remnawave/remnawave-json/templates/subscription/index.html"
+        WEB_PAGE_TEMPLATE_HOST_PATH="$REMNAWAVE_DIR/remnawave-json/templates/subscription/index.html"
         WEB_PAGE_TEMPLATE_PATH_LINE="WEB_PAGE_TEMPLATE_PATH=/app/templates/subscription/index.html"
         
         # HAPP_ANNOUNCEMENTS
@@ -519,24 +475,13 @@ services:
 EOF
         
         # Создание Makefile для remnawave-json
-        cat > Makefile << 'EOF'
-.PHONY: start stop restart logs
-
-start:
-	docker compose up -d && docker compose logs -f -t
-stop:
-	docker compose down
-restart:
-	docker compose down && docker compose up -d
-logs:
-	docker compose logs -f -t
-EOF
+        create_makefile "$REMNAWAVE_DIR/remnawave-json"
 
         echo -e "${BOLD_GREEN}Конфигурация remnawave-json завершена.${NC}"
     fi
     
     # Настройка Caddy
-    cd ~/remnawave/caddy
+    cd $REMNAWAVE_DIR/caddy
     
     # Определение SUB_BACKEND_URL в зависимости от установки remnawave-json
     if [ "$INSTALL_REMNAWAVE_JSON" = "y" ] || [ "$INSTALL_REMNAWAVE_JSON" = "yes" ]; then
@@ -612,27 +557,16 @@ volumes:
 EOF
     
     # Создание Makefile для Caddy
-    cat > Makefile << 'EOF'
-.PHONY: start stop restart logs
-
-start:
-	docker compose up -d && docker compose logs -f -t
-stop:
-	docker compose down
-restart:
-	docker compose down && docker compose up -d
-logs:
-	docker compose logs -f -t
-EOF
+    create_makefile "$REMNAWAVE_DIR/caddy"
     
     # Создание директории для логов
-    mkdir -p logs
+    mkdir -p $REMNAWAVE_DIR/caddy/logs
     
     # Запуск всех контейнеров
     echo -e "${BOLD_GREEN}Запуск контейнеров...${NC}"
     
     # Запуск панели RemnaWave
-    cd ~/remnawave/panel
+    cd $REMNAWAVE_DIR/panel
     docker compose up -d
     
     # Ждем инициализации панели
@@ -640,39 +574,55 @@ EOF
     echo -e "${BOLD_GREEN}Контейнеры панели RemnaWave запущены.${NC}"
     
     # Запуск Caddy
-    cd ~/remnawave/caddy
+    cd $REMNAWAVE_DIR/caddy
     docker compose up -d
     
     # Ждем инициализации Caddy
     sleep 5
     if ! docker ps | grep -q "caddy-remnawave"; then
         echo -e "${BOLD_RED}Caddy контейнер не запустился. Проверьте вашу конфигурацию домена.${NC}"
-        echo -e "${ORANGE}Вы можете проверить логи позже с помощью 'make logs' в директории ~/remnawave/caddy.${NC}"
+        echo -e "${ORANGE}Вы можете проверить логи позже с помощью 'make logs' в директории $REMNAWAVE_DIR/caddy.${NC}"
     else
         echo -e "${BOLD_GREEN}Caddy reverse proxy успешно запущен.${NC}"
     fi
     
     # Запуск remnawave-json (если был выбран)
     if [ "$INSTALL_REMNAWAVE_JSON" = "y" ] || [ "$INSTALL_REMNAWAVE_JSON" = "yes" ]; then
-        cd ~/remnawave/remnawave-json
+        cd $REMNAWAVE_DIR/remnawave-json
         docker compose up -d
         
         # Ждем инициализации контейнера
         sleep 5
         if ! docker ps | grep -q "remnawave-json"; then
             echo -e "${BOLD_RED}Контейнер remnawave-json не запустился. Проверьте конфигурацию.${NC}"
-            echo -e "${ORANGE}Вы можете проверить логи позже с помощью 'make logs' в директории ~/remnawave/remnawave-json.${NC}"
+            echo -e "${ORANGE}Вы можете проверить логи позже с помощью 'make logs' в директории $REMNAWAVE_DIR/remnawave-json.${NC}"
         else
             echo -e "${BOLD_GREEN}remnawave-json успешно запущен.${NC}"
         fi
     fi
+    
+    # Сохраняем учетные данные в файл
+    CREDENTIALS_FILE="$REMNAWAVE_DIR/credentials.txt"
+    {
+        echo "Учетные данные для доступа к панели Remnawave"
+        echo "================================================"
+        echo "Домен панели: https://$SCRIPT_PANEL_DOMAIN"
+        echo "Домен подписок: https://$SCRIPT_SUB_DOMAIN"
+        echo "================================================"
+        echo "Логин администратора: $SUPERADMIN_USERNAME"
+        echo "Пароль администратора: $SUPERADMIN_PASSWORD"
+        echo "================================================"
+        echo "Дата установки: $(date)"
+        echo "Версия установщика: $VERSION"
+    } > "$CREDENTIALS_FILE"
+    chmod 600 "$CREDENTIALS_FILE"
     
     echo -e "${GREEN}Панель Remnawave успешно установлена и настроена с Caddy${NC}"
     echo
     echo -e "\033[1m┌──────────────────────────────────────────────────────┐\033[0m"
     echo -e "\033[1m│     Ваш домен для панели:                            │\033[0m"
     
-    # Calculate padding for PANEL_DOMAIN
+    # Вычисляем отступ для PANEL_DOMAIN
     local panel_domain_text="https://$SCRIPT_PANEL_DOMAIN"
     local panel_padding_right=$((54 - 2 - ${#panel_domain_text}))
     echo -e "\033[1m│ $panel_domain_text$(printf '%*s' $panel_padding_right) │\033[0m"
@@ -680,15 +630,22 @@ EOF
     echo -e "\033[1m│                                                      │\033[0m"
     echo -e "\033[1m│ Ваш домен для подписок:                              │\033[0m"
     
-    # Calculate padding for SUB_DOMAIN
+    # Вычисляем отступ для SUB_DOMAIN
     local sub_domain_text="https://$SCRIPT_SUB_DOMAIN"
     local sub_padding_right=$((54 - 2 - ${#sub_domain_text}))
     echo -e "\033[1m│ $sub_domain_text$(printf '%*s' $sub_padding_right) │\033[0m"
     
+    echo -e "\033[1m│                                                      │\033[0m"
+    echo -e "\033[1m│ Логин администратора: $SUPERADMIN_USERNAME$(printf '%*s' $((54 - 24 - ${#SUPERADMIN_USERNAME}))) │\033[0m"
+    
+    echo -e "\033[1m│ Пароль администратора: $SUPERADMIN_PASSWORD$(printf '%*s' $((54 - 25 - ${#SUPERADMIN_PASSWORD}))) │\033[0m"
+    
     echo -e "\033[1m└──────────────────────────────────────────────────────┘\033[0m"
     echo
-    echo -e "${BOLD_BLUE}Директория панели: ${NC}~/remnawave/panel"
-    echo -e "${BOLD_BLUE}Директория Caddy: ${NC}~/remnawave/caddy"
+    echo -e "${ORANGE}Учетные данные сохранены в файле: $CREDENTIALS_FILE${NC}"
+    echo
+    echo -e "${BOLD_BLUE}Директория панели: ${NC}$REMNAWAVE_DIR/panel"
+    echo -e "${BOLD_BLUE}Директория Caddy: ${NC}$REMNAWAVE_DIR/caddy"
     echo
     echo -e "${BOLD_GREEN}Вы можете управлять обеими службами с помощью команды 'make' в соответствующих директориях:${NC}"
     echo -e "  ${ORANGE}make start   ${NC}- Запуск службы и просмотр логов"
@@ -698,20 +655,18 @@ EOF
     echo
     
     cd ~
-    draw_info_box "Панель Remnawave" "Расширенная настройка v0.2"
+    draw_info_box "Панель Remnawave" "Расширенная настройка $VERSION"
     
     echo -e "${BOLD_GREEN}Установка завершена. Нажмите Enter, чтобы продолжить...${NC}"
     read -r
 }
 
+# ===================================================================================
+#                              УСТАНОВКА НОДЫ REMNAWAVE
+# ===================================================================================
+
 setup_node() {
     clear
-    
-    check_internet || {
-        echo -e "${BOLD_RED}Ошибка: Для настройки ноды требуется подключение к интернету.${NC}"
-        sleep 2
-        return 1
-    }
     
     check_and_install_make || {
         echo -e "${BOLD_RED}Ошибка: Для настройки ноды требуется утилита make. Пожалуйста, установите его вручную.${NC}"
@@ -722,36 +677,15 @@ setup_node() {
     # Установка общих зависимостей
     install_dependencies
     
-    mkdir -p ~/remnanode && cd ~/remnanode
+    mkdir -p $REMNANODE_DIR && cd $REMNANODE_DIR
     curl -sS https://raw.githubusercontent.com/remnawave/node/refs/heads/main/docker-compose-prod.yml > docker-compose.yml
     
     # Создание Makefile для ноды
-    cat > Makefile << 'EOF'
-.PHONY: start stop restart logs
-
-start:
-	docker compose up -d && docker compose logs -f -t
-stop:
-	docker compose down
-restart:
-	docker compose down && docker compose up -d
-logs:
-	docker compose logs -f -t
-EOF
+    create_makefile "$REMNANODE_DIR"
     
-    while true; do
-        echo -ne "${ORANGE}Введите порт для вашей ноды (предпочтительно между 50000-60000): ${NC}"
-        read NODE_PORT
-        echo
-        
-        if [ -z "$NODE_PORT" ]; then
-            echo -e "${BOLD_RED}Ошибка: Порт не может быть пустым. Пожалуйста, введите допустимое число.${NC}"
-        elif validate_numeric_port "$NODE_PORT"; then
-            break
-        else
-            echo -e "${BOLD_RED}Ошибка: Пожалуйста, введите допустимый номер порта (1-65535).${NC}"
-        fi
-    done
+    echo -ne "${ORANGE}Введите порт для вашей ноды (предпочтительно между 50000-60000): ${NC}"
+    read NODE_PORT
+    echo
     
     echo -e "${ORANGE}Введите сертификат сервера (вставьте содержимое и 2 раза нажмите Enter): ${NC}"
     CERTIFICATE=""
@@ -759,42 +693,17 @@ EOF
         if [ -z "$line" ]; then
             if [ -n "$CERTIFICATE" ]; then
                 break
-            else
-                echo -e "${BOLD_RED}Ошибка: Сертификат не может быть пустым. Пожалуйста, введите содержимое сертификата.${NC}"
             fi
         else
             CERTIFICATE="$CERTIFICATE$line\n"
         fi
     done
     
-    while true; do
-        echo -ne "${BOLD_RED}Вы уверены, что сертификат правильный? (y/n): ${NC}"
-        read confirm
-        echo
-        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-            break
-        elif [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
-            echo -e "${ORANGE}Введите сертификат сервера (вставьте содержимое и нажмите Enter на пустой строке для завершения): ${NC}"
-            CERTIFICATE=""
-            while IFS= read -r line; do
-                if [ -z "$line" ]; then
-                    if [ -n "$CERTIFICATE" ]; then
-                        break
-                    else
-                        echo -e "${BOLD_RED}Ошибка: Сертификат не может быть пустым. Пожалуйста, введите содержимое сертификата.${NC}"
-                    fi
-                else
-                    CERTIFICATE="$CERTIFICATE$line\n"
-                fi
-            done
-        else
-            echo -e "${BOLD_RED}Пожалуйста, введите 'y' или 'n'.${NC}"
-        fi
-    done
+    echo -ne "${BOLD_RED}Вы уверены, что сертификат правильный? (y/n): ${NC}"
+    read confirm
+    echo
     
-    (
-        echo -e "### APP ###\nAPP_PORT=$NODE_PORT\n$CERTIFICATE" > .env
-    ) & show_setup_animation
+    echo -e "### APP ###\nAPP_PORT=$NODE_PORT\n$CERTIFICATE" > .env
     
     docker compose up -d && docker compose logs -f > /tmp/node_logs 2>&1 & LOGS_PID=$!
     sleep 1
@@ -814,9 +723,9 @@ EOF
     if [ "$NODE_STATUS" = "running" ]; then
         echo -e "${BOLD_GREEN}✓ Нода Remnawave успешно установлена и запущена!${NC}"
         echo -e "${LIGHT_GREEN}• Порт ноды: ${BOLD_GREEN}$NODE_PORT${NC}"
-        echo -e "${LIGHT_GREEN}• Директория ноды: ${BOLD_GREEN}~/remnanode${NC}"
+        echo -e "${LIGHT_GREEN}• Директория ноды: ${BOLD_GREEN}$REMNANODE_DIR${NC}"
         echo -e "\n${LIGHT_GREEN}Для управления нодой используйте следующие команды:${NC}"
-        echo -e "${ORANGE}   cd ~/remnanode${NC}"
+        echo -e "${ORANGE}   cd $REMNANODE_DIR${NC}"
         echo -e "${ORANGE}   make start   ${NC}- Запуск ноды и просмотр логов"
         echo -e "${ORANGE}   make stop    ${NC}- Остановка ноды"
         echo -e "${ORANGE}   make restart ${NC}- Перезапуск ноды"
@@ -824,7 +733,7 @@ EOF
     else
         echo -e "${BOLD_RED}⚠ Нода Remnawave была установлена, но не запущена автоматически.${NC}"
         echo -e "${LIGHT_RED}Для запуска ноды вручную выполните:${NC}"
-        echo -e "${ORANGE}   cd ~/remnawave${NC}"
+        echo -e "${ORANGE}   cd $REMNANODE_DIR${NC}"
         echo -e "${ORANGE}   make start${NC}"
         echo -e "\n${LIGHT_RED}Если ошибка сохраняется, проверьте логи:${NC}"
         echo -e "${ORANGE}   make logs${NC}"
@@ -836,14 +745,12 @@ EOF
     read -r
 }
 
+# ===================================================================================
+#                              НАСТРОЙКА САЙТА-ЗАГЛУШКИ
+# ===================================================================================
+
 setup_selfsteal() {
     clear
-    
-    check_internet || {
-        echo -e "${BOLD_RED}Ошибка: Для настройки сайта заглушки требуется подключение к интернету.${NC}"
-        sleep 2
-        return 1
-    }
     
     check_and_install_make || {
         echo -e "${BOLD_RED}Ошибка: Для настройки сайта заглушки требуется утилита make. Пожалуйста, установите его вручную.${NC}"
@@ -854,34 +761,16 @@ setup_selfsteal() {
     # Установка общих зависимостей
     install_dependencies
     
-    mkdir -p ~/selfsteal/html && cd ~/selfsteal
+    mkdir -p $SELFSTEAL_DIR/html && cd $SELFSTEAL_DIR
     
     # Запрос информации о домене и порте
-    while true; do
-        echo -ne "${ORANGE}Введите домен для сайта-заглушки (совпадает с XRAY конфигом - realitySettings.serverNames): ${NC}"
-        read SELF_STEAL_DOMAIN
-        echo
-        
-        if [ -z "$SELF_STEAL_DOMAIN" ]; then
-            echo -e "${BOLD_RED}Ошибка: Домен не может быть пустым. Пожалуйста, введите имя домена.${NC}"
-        else
-            break
-        fi
-    done
+    echo -ne "${ORANGE}Введите домен для сайта-заглушки (совпадает с XRAY конфигом - realitySettings.serverNames): ${NC}"
+    read SELF_STEAL_DOMAIN
+    echo
     
-    while true; do
-        echo -ne "${ORANGE}Введите порт для сайта-заглушки (совпадает с XRAY конфигом - realitySettings.dest): ${NC}"
-        read SELF_STEAL_PORT
-        echo
-        
-        if [ -z "$SELF_STEAL_PORT" ]; then
-            echo -e "${BOLD_RED}Ошибка: Порт не может быть пустым. Пожалуйста, введите номер порта.${NC}"
-        elif validate_numeric_port "$SELF_STEAL_PORT"; then
-            break
-        else
-            echo -e "${BOLD_RED}Ошибка: Пожалуйста, введите допустимый номер порта (1-65535).${NC}"
-        fi
-    done
+    echo -ne "${ORANGE}Введите порт для сайта-заглушки (совпадает с XRAY конфигом - realitySettings.dest): ${NC}"
+    read SELF_STEAL_PORT
+    echo
     
     # Создаем .env файл
     cat > .env << EOF
@@ -933,7 +822,7 @@ EOF
 services:
   caddy:
     image: caddy:2.9.1
-    container_name: caddy-remnawave
+    container_name: caddy-selfsteal
     restart: unless-stopped
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
@@ -951,18 +840,7 @@ volumes:
 EOF
     
     # Создание Makefile для управления
-    cat > Makefile << 'EOF'
-.PHONY: start stop restart logs
-
-start:
-	docker compose up -d && docker compose logs -f -t
-stop:
-	docker compose down
-restart:
-	docker compose down && docker compose up -d
-logs:
-	docker compose logs -f -t
-EOF
+    create_makefile "$SELFSTEAL_DIR"
     
     # Создание директорий и скачивание файлов с GitHub
     echo -e "${GREEN}Скачивание файлов для сайта-заглушки...${NC}"
@@ -981,12 +859,8 @@ EOF
     curl -s -o ./html/assets/vendor-legacy-Cq-AagHX.js https://raw.githubusercontent.com/xxphantom/caddy-for-remnawave/refs/heads/main/html/assets/vendor-legacy-Cq-AagHX.js
     
     # Запуск сервиса
-    (
-        mkdir -p logs
-        docker compose up -d
-    ) & show_setup_animation
-    
-    wait $!
+    mkdir -p logs
+    docker compose up -d
     
     # Проверяем, запущен ли сервис
     CADDY_STATUS=$(docker compose ps --services --filter "status=running" | grep -q "caddy" && echo "running" || echo "stopped")
@@ -997,9 +871,9 @@ EOF
         echo -e "${BOLD_GREEN}✓ Caddy для сайта-заглушки успешно установлен и запущен!${NC}"
         echo -e "${LIGHT_GREEN}• Домен: ${BOLD_GREEN}$SELF_STEAL_DOMAIN${NC}"
         echo -e "${LIGHT_GREEN}• Порт: ${BOLD_GREEN}$SELF_STEAL_PORT${NC}"
-        echo -e "${LIGHT_GREEN}• Директория: ${BOLD_GREEN}~/selfsteal${NC}"
+        echo -e "${LIGHT_GREEN}• Директория: ${BOLD_GREEN}$SELFSTEAL_DIR${NC}"
         echo -e "\n${LIGHT_GREEN}Для управления сервисом используйте следующие команды:${NC}"
-        echo -e "${ORANGE}   cd ~/selfsteal${NC}"
+        echo -e "${ORANGE}   cd $SELFSTEAL_DIR${NC}"
         echo -e "${ORANGE}   make start   ${NC}- Запуск сервиса и просмотр логов"
         echo -e "${ORANGE}   make stop    ${NC}- Остановка сервиса"
         echo -e "${ORANGE}   make restart ${NC}- Перезапуск сервиса"
@@ -1007,11 +881,14 @@ EOF
     else
         echo -e "${BOLD_RED}⚠ Caddy для сайта-заглушки был установлен, но не запущен автоматически.${NC}"
         echo -e "${LIGHT_RED}Для запуска сервиса вручную выполните:${NC}"
-        echo -e "${ORANGE}   cd ~/selfsteal${NC}"
+        echo -e "${ORANGE}   cd $SELFSTEAL_DIR${NC}"
         echo -e "${ORANGE}   make start${NC}"
         echo -e "\n${LIGHT_RED}Если ошибка сохраняется, проверьте логи:${NC}"
         echo -e "${ORANGE}   make logs${NC}"
     fi
+    
+    echo -e "${ORANGE}Конфигурация сайта-заглушки сохранена в файле: $SELFSTEAL_CONFIG_FILE${NC}"
+    echo
     
     unset SELF_STEAL_DOMAIN
     unset SELF_STEAL_PORT
@@ -1020,8 +897,12 @@ EOF
     read -r
 }
 
+# ===================================================================================
+#                              ГЛАВНОЕ МЕНЮ
+# ===================================================================================
+
 main() {
-    draw_info_box "Панель Remnawave" "Расширенная настройка v0.2"
+    draw_info_box "Панель Remnawave" "Расширенная настройка $VERSION"
     
     while true; do
         echo ""
@@ -1048,12 +929,12 @@ main() {
                 setup_selfsteal
                 ;;
             4)
-                exiting_animation
+                echo "Готово."
                 break
                 ;;
             *)
                 clear
-                draw_info_box "Панель Remnawave" "Расширенная настройка v0.2"
+                draw_info_box "Панель Remnawave" "Расширенная настройка $VERSION"
                 echo -e "${BOLD_RED}Неверный выбор, пожалуйста, попробуйте снова.${NC}"
                 sleep 1
                 ;;
@@ -1061,22 +942,5 @@ main() {
     done
 }
 
-validate_telegram_token() {
-    local token="$1"
-    if [[ "$token" =~ ^[0-9]{8,10}:[A-Za-z0-9_-]{35}$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-validate_numeric_id() {
-    local id="$1"
-    if [[ "$id" =~ ^[0-9]+$ || "$id" =~ ^-[0-9]+$ ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
+# Запуск основной функции
 main
