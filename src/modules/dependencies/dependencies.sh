@@ -4,7 +4,6 @@
 
 install_dependencies() {
     echo -e "${GREEN}Проверка зависимостей...${NC}"
-    sudo apt update -y >/dev/null 2>&1
 
     # Проверка и установка утилиты make
     check_and_install_make() {
@@ -34,6 +33,7 @@ install_dependencies() {
         echo ""
         echo -e "${GREEN}Установка Docker и других необходимых пакетов...${NC}"
 
+        sudo apt update -y >/dev/null 2>&1
         # Установка предварительных зависимостей
         sudo apt install -y apt-transport-https ca-certificates curl software-properties-common make >/dev/null 2>&1
 
@@ -73,10 +73,4 @@ install_dependencies() {
             exit 1
         fi
     fi
-
-    # Проверка работы docker
-    docker --version >/dev/null 2>&1
-
-    echo -e "${GREEN}Пакеты успешно установлены.${NC}"
-    sleep 2
 }

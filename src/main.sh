@@ -63,16 +63,15 @@ source "$SCRIPT_DIR/modules/selfsteal/selfsteal.sh" || {
 # ===================================================================================
 
 main() {
-    draw_info_box "Панель Remnawave" "Расширенная настройка $VERSION"
 
     while true; do
-        draw_info_box "Установщик Remnawave" "$VERSION"
+    draw_info_box "Панель Remnawave" "Автоматическая установка $VERSION"
 
         echo -e "${BOLD_BLUE_MENU}Пожалуйста, выберите компонент для установки:${NC}"
         echo
-        echo -e "  ${GREEN}1. ${NC}Установить/настроить панель Remnawave"
-        echo -e "  ${GREEN}2. ${NC}Установить/настроить ноду Remnawave"
-        echo -e "  ${GREEN}3. ${NC}Установить/настроить сайт-заглушку"
+        echo -e "  ${GREEN}1. ${NC}Установить панель Remnawave"
+        echo -e "  ${GREEN}2. ${NC}Установить ноду Remnawave"
+        echo -e "  ${GREEN}3. ${NC}Установить сайт-заглушку"
         echo -e "  ${GREEN}4. ${NC}Выход"
         echo
         echo -ne "${BOLD_BLUE_MENU}Выберите опцию (1-4): ${NC}"
