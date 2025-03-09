@@ -25,7 +25,7 @@ install_panel() {
     DB_PASSWORD=$(generate_secure_password 16)
     DB_NAME="remnawave_db"
 
-    curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/main/.env.sample
+    curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/.env.sample
 
     # Спрашиваем, нужна ли интеграция с Telegram
     echo -ne "${GREEN}Хотите включить интеграцию с Telegram? (y/n): ${NC}"
@@ -144,57 +144,8 @@ install_panel() {
     echo -e "${GREEN}Файл .env успешно настроен.${NC}"
     sleep 3
 
-    # Создание docker-compose.yml для панели
-    cat >docker-compose.yml <<'EOF'
-services:
-    remnawave-db:
-        image: postgres:17
-        container_name: 'remnawave-db'
-        hostname: remnawave-db
-        restart: always
-        env_file:
-            - .env
-        environment:
-            - POSTGRES_USER=${POSTGRES_USER}
-            - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-            - POSTGRES_DB=${POSTGRES_DB}
-            - TZ=UTC
-        ports:
-            - '127.0.0.1:6767:5432'
-        volumes:
-            - remnawave-db-data:/var/lib/postgresql/data
-        networks:
-            - remnawave-network
-        healthcheck:
-            test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
-            interval: 3s
-            timeout: 10s
-            retries: 3
-
-    remnawave:
-        image: remnawave/backend:latest
-        container_name: 'remnawave'
-        hostname: remnawave
-        restart: always
-        ports:
-            - '127.0.0.1:3000:3000'
-        env_file:
-            - .env
-        networks:
-            - remnawave-network
-
-networks:
-    remnawave-network:
-        name: remnawave-network
-        driver: bridge
-        external: false
-
-volumes:
-    remnawave-db-data:
-        driver: local
-        external: false
-        name: remnawave-db-data
-EOF
+    # Создаем docker-compose.yml для панели
+    curl -s -o docker-compose.yml https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/docker-compose-prod.yml
 
     # Создаем Makefile
     create_makefile "$REMNAWAVE_DIR/panel"
@@ -223,7 +174,12 @@ EOF
 
     # Ждем инициализации панели
     sleep 5
-    echo -e "${BOLD_GREEN}Контейнеры панели RemnaWave запущены.${NC}"
+    if ! docker ps | grep -q "remnawave/backend"; then
+        echo -e "${BOLD_RED}RemaWave контейнер не запустился.${NC}"
+        echo -e "${ORANGE}Вы можете проверить логи позже с помощью 'make logs' в директории $REMNAWAVE_DIR/panel.${NC}"
+    else
+        echo -e "${BOLD_GREEN}Контейнеры панели RemnaWave запущены.${NC}"
+    fi
 
     # Запуск Caddy
     cd $REMNAWAVE_DIR/caddy
