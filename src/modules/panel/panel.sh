@@ -253,21 +253,5 @@ EOF
         fi
     fi
 
-    # Сохраняем учетные данные в файл
-    CREDENTIALS_FILE="$REMNAWAVE_DIR/credentials.txt"
-    {
-        echo "Учетные данные для доступа к панели Remnawave"
-        echo "================================================"
-        echo "Домен панели: https://$SCRIPT_PANEL_DOMAIN"
-        echo "Домен подписок: https://$SCRIPT_SUB_DOMAIN"
-        echo "================================================"
-        echo "Логин администратора: $SUPERADMIN_USERNAME"
-        echo "Пароль администратора: $SUPERADMIN_PASSWORD"
-        echo "================================================"
-        echo "Дата установки: $(date)"
-        echo "Версия установщика: $VERSION"
-    } >"$CREDENTIALS_FILE"
-    chmod 600 "$CREDENTIALS_FILE"
-
     display_panel_installation_complete_message
 }

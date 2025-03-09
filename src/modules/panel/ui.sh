@@ -27,8 +27,6 @@ display_panel_installation_complete_message() {
 
     echo -e "\033[1m└──────────────────────────────────────────────────────┘\033[0m"
     echo
-    echo -e "${ORANGE}Учетные данные сохранены в файле: $CREDENTIALS_FILE${NC}"
-    echo
     echo -e "${BOLD_BLUE}Директория панели: ${NC}$REMNAWAVE_DIR/panel"
     echo -e "${BOLD_BLUE}Директория Caddy: ${NC}$REMNAWAVE_DIR/caddy"
     echo
