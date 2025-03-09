@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Remnawave Installer (модульная версия)
-# Собрано: Sun Mar  9 10:48:39 MSK 2025
+# Собрано: Sun Mar  9 10:59:02 MSK 2025
 
 # Включение модуля: common.sh
 
@@ -69,9 +69,9 @@ draw_info_box() {
 # Генерация надежного пароля
 generate_secure_password() {
     local length=${1:-16}
-    local chars='a-zA-Z0-9!@#$%^&*()_+.,'
+    local chars='a-zA-Z0-9!#$%^&*()_+.,'
     
-    local special_chars='!@#$%^&*()_+.,'
+    local special_chars='!#$%^&*()_+.,'
     local special_char=$(echo "$special_chars" | fold -w1 | shuf | head -n1)
     
     if command -v openssl &> /dev/null; then
