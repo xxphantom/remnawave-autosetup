@@ -101,3 +101,53 @@ logs:
 	docker compose logs -f -t
 EOF
 }
+
+# Функция для регистрации пользователя в панели
+register_user() {
+    local domain="$1"
+    local username="$2"
+    local password="$3"
+    
+    if [[ -z "$domain" || -z "$username" || -z "$password" ]]; then
+        echo -e "${BOLD_RED}Ошибка: все параметры (домен, имя пользователя, пароль) обязательны${NC}"
+        return 1
+    fi
+    
+    # Формируем полный URL для регистрации
+    local api_url="https://${domain}/api/auth/register"
+    
+    # Выполняем запрос регистрации
+    local response=$(curl -s "$api_url" \
+      -H 'accept: application/json' \
+      -H 'accept-language: en-GB,en;q=0.9,ru;q=0.8,en-US;q=0.7,zh-CN;q=0.6,zh;q=0.5' \
+      -H 'authorization: Bearer' \
+      -H 'cache-control: no-cache' \
+      -H 'content-type: application/json' \
+      -H 'dnt: 1' \
+      -H 'origin: https://'"$domain" \
+      -H 'pragma: no-cache' \
+      -H 'priority: u=1, i' \
+      -H 'sec-ch-ua: "Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"' \
+      -H 'sec-ch-ua-mobile: ?0' \
+      -H 'sec-ch-ua-platform: "Windows"' \
+      -H 'sec-fetch-dest: empty' \
+      -H 'sec-fetch-mode: cors' \
+      -H 'sec-fetch-site: same-origin' \
+      -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36' \
+      --data-raw '{"username":"'"$username"'","password":"'"$password"'"}')
+    
+    # Проверяем успешность регистрации и извлекаем токен
+    if [[ "$response" == *"accessToken"* ]]; then
+        # Извлекаем токен из ответа
+        local access_token=$(echo "$response" | grep -o '"accessToken":"[^"]*"' | awk -F'"' '{print $4}')
+        
+        echo -e "${BOLD_GREEN}Пользователь $username успешно зарегистрирован в панели${NC}"
+        
+        # Возвращаем токен
+        echo "$access_token"
+        return 0
+    else
+        echo -e "${BOLD_RED}Ошибка при регистрации пользователя: $response${NC}"
+        return 1
+    fi
+}

@@ -20,10 +20,11 @@ install_panel() {
     JWT_AUTH_SECRET=$(openssl rand -hex 32 | tr -d '\n')
     JWT_API_TOKENS_SECRET=$(openssl rand -hex 32 | tr -d '\n')
 
-    # Генерация безопасных учетных данных для базы данных
+    # Генерация безопасных учетных данных
     DB_USER="remnawave_$(openssl rand -hex 4 | tr -d '\n')"
     DB_PASSWORD=$(generate_secure_password 16)
     DB_NAME="remnawave_db"
+    METRICS_PASS=$(generate_secure_password 16)
 
     curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/.env.sample
 
@@ -134,12 +135,13 @@ install_panel() {
     sed -i "s|SUB_SUPPORT_URL=https://support.example.com|SUB_SUPPORT_URL=https://$SUB_SUPPORT_DOMAIN|" .env
     sed -i "s|SUB_WEBPAGE_URL=https://example.com|SUB_WEBPAGE_URL=https://$SUB_WEBPAGE_DOMAIN|" .env
     sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
-    sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
-    sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
+    # sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
+    # sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
     sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@remnawave-db:5432/$DB_NAME|" .env
     sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=$DB_USER|" .env
     sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
     sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=$DB_NAME|" .env
+    sed -i "s|METRICS_PASS=.*|METRICS_PASS=$METRICS_PASS|" .env
 
     echo -e "${GREEN}Файл .env успешно настроен.${NC}"
     sleep 3
@@ -150,20 +152,17 @@ install_panel() {
     # Создаем Makefile
     create_makefile "$REMNAWAVE_DIR/panel"
 
-# ===================================================================================
-# Установка и настройка remnawave-json
-# ===================================================================================
+    # ===================================================================================
+    # Установка и настройка remnawave-json
+    # ===================================================================================
 
     setup_remnawave_json
 
-# ===================================================================================
-# Установка и настройка Caddy для панели и подписок
-# ===================================================================================
+    # ===================================================================================
+    # Установка и настройка Caddy для панели и подписок
+    # ===================================================================================
 
     setup_caddy_for_panel
-
-    # Создание директории для логов
-    mkdir -p $REMNAWAVE_DIR/caddy/logs
 
     # Запуск всех контейнеров
     echo -e "${BOLD_GREEN}Запуск контейнеров...${NC}"
@@ -207,6 +206,18 @@ install_panel() {
         else
             echo -e "${BOLD_GREEN}remnawave-json успешно запущен.${NC}"
         fi
+    fi
+
+
+    # Регистрация пользователя и получение токена
+    ACCESS_TOKEN=$(register_panel_user $PANEL_DOMAIN $SUPERADMIN_USERNAME $SUPERADMIN_PASSWORD)
+
+    if [ -z "$ACCESS_TOKEN" ]; then
+        echo -e "${BOLD_RED}Ошибка при регистрации пользователя. Проверьте введенные данные.${NC}"
+        exit 1
+    else
+        echo -e "${BOLD_GREEN}Пользователь успешно зарегистрирован!${NC}"
+        echo -e "${BOLD_YELLOW}Токен доступа по API:${NC} $ACCESS_TOKEN"
     fi
 
     display_panel_installation_complete_message

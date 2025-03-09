@@ -78,7 +78,9 @@ volumes:
   caddy_config_panel:
 EOF
 
-    # Создание Makefile для Caddy
+    # Создание Makefile
     create_makefile "$REMNAWAVE_DIR/caddy"
 
+    # Создание директории для логов
+    mkdir -p $REMNAWAVE_DIR/caddy/logs
 }
