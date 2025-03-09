@@ -20,6 +20,11 @@ install_panel() {
     JWT_AUTH_SECRET=$(openssl rand -hex 32 | tr -d '\n')
     JWT_API_TOKENS_SECRET=$(openssl rand -hex 32 | tr -d '\n')
 
+    # Генерация безопасных учетных данных для базы данных
+    DB_USER="remnawave_$(openssl rand -hex 4 | tr -d '\n')"
+    DB_PASSWORD=$(generate_secure_password 16)
+    DB_NAME="remnawave_db"
+
     curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/main/.env.sample
 
     # Спрашиваем, нужна ли интеграция с Telegram
@@ -92,24 +97,26 @@ install_panel() {
 
     if [ "$password_option" = "1" ]; then
         # Ручной ввод пароля
-        echo -ne "${ORANGE}Введите пароль SuperAdmin: ${NC}"
-        stty -echo
-        read PASSWORD1
-        stty echo
-        echo
+        while true; do
+            echo -ne "${ORANGE}Введите пароль SuperAdmin: ${NC}"
+            stty -echo
+            read PASSWORD1
+            stty echo
+            echo
 
-        echo -ne "${BOLD_RED}Повторно введите пароль SuperAdmin для подтверждения: ${NC}"
-        stty -echo
-        read PASSWORD2
-        stty echo
-        echo
+            echo -ne "${BOLD_RED}Повторно введите пароль SuperAdmin для подтверждения: ${NC}"
+            stty -echo
+            read PASSWORD2
+            stty echo
+            echo
 
-        if [ "$PASSWORD1" = "$PASSWORD2" ]; then
-            SUPERADMIN_PASSWORD=$PASSWORD1
-        else
-            echo -e "${BOLD_RED}Пароли не совпадают. Будет использован первый введенный пароль.${NC}"
-            SUPERADMIN_PASSWORD=$PASSWORD1
-        fi
+            if [ "$PASSWORD1" = "$PASSWORD2" ]; then
+                SUPERADMIN_PASSWORD=$PASSWORD1
+                break
+            else
+                echo -e "${BOLD_RED}Пароли не совпадают. Пожалуйста, попробуйте снова.${NC}"
+            fi
+        done
     else
         # Автоматическая генерация пароля
         SUPERADMIN_PASSWORD=$(generate_secure_password 16)
@@ -129,6 +136,10 @@ install_panel() {
     sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
     sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
     sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
+    sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@remnawave-db:5432/$DB_NAME|" .env
+    sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=$DB_USER|" .env
+    sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
+    sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=$DB_NAME|" .env
 
     echo -e "${GREEN}Файл .env успешно настроен.${NC}"
     sleep 3
