@@ -22,7 +22,7 @@
 Для запуска установщика выполните следующую команду в терминале:
 
 ```bash
-wget -O start.sh https://raw.githubusercontent.com/xxphantom/remnawave-autosetup/refs/heads/main/start.sh && chmod +x start.sh && ./start.sh
+bash <(curl -Ls https://raw.githubusercontent.com/xxphantom/remnawave-autosetup/refs/heads/dev/dist/install_remnawave.sh)
 ```
 
 ## Процесс установки
