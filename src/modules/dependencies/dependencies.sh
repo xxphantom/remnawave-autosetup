@@ -1,28 +1,39 @@
 #!/bin/bash
 
-# Установка общих зависимостей для всех компонентов
+# Функция для проверки и установки зависимостей
+check_and_install_dependency() {
+    local packages=("$@")
+    local failed=false
+    
+    for package_name in "${packages[@]}"; do
+        if ! command -v $package_name &>/dev/null; then
+            echo -e "${GREEN}Установка пакета $package_name...${NC}"
+            sudo apt install -y $package_name >/dev/null 2>&1
+            if ! command -v $package_name &>/dev/null; then
+                echo -e "${BOLD_RED}Ошибка: Не удалось установить $package_name. Пожалуйста, установите его вручную.${NC}"
+                echo -e "${BOLD_RED}Для работы скрипта требуется пакет $package_name.${NC}"
+                sleep 2
+                failed=true
+            else
+                echo -e "${GREEN}Пакет $package_name успешно установлен.${NC}"
+            fi
+        fi
+    done
+    
+    if [ "$failed" = true ]; then
+        return 1
+    fi
+    return 0
+}
 
+# Установка общих зависимостей для всех компонентов
 install_dependencies() {
     echo -e "${GREEN}Проверка зависимостей...${NC}"
+    sudo apt update >/dev/null 2>&1
 
-    # Проверка и установка утилиты make
-    check_and_install_make() {
-        if ! command -v make &>/dev/null; then
-            echo -e "${GREEN}Установка утилиты make...${NC}"
-            sudo apt update >/dev/null 2>&1
-            sudo apt install -y make >/dev/null 2>&1
-            if ! command -v make &>/dev/null; then
-                echo -e "${BOLD_RED}Ошибка: Не удалось установить make. Пожалуйста, установите его вручную.${NC}"
-                return 1
-            fi
-            echo -e "${GREEN}Утилита make успешно установлена.${NC}"
-        fi
-        return 0
-    }
-
-    check_and_install_make || {
-        echo -e "${BOLD_RED}Ошибка: Для настройки сайта заглушки требуется утилита make. Пожалуйста, установите его вручную.${NC}"
-        sleep 2
+    # Проверка и установка необходимых пакетов
+    check_and_install_dependency "curl" "jq" "make" || {
+        echo -e "${BOLD_RED}Ошибка: Не все необходимые зависимости были установлены.${NC}"
         return 1
     }
 
@@ -33,7 +44,6 @@ install_dependencies() {
         echo ""
         echo -e "${GREEN}Установка Docker и других необходимых пакетов...${NC}"
 
-        sudo apt update -y >/dev/null 2>&1
         # Установка предварительных зависимостей
         sudo apt install -y apt-transport-https ca-certificates curl software-properties-common make >/dev/null 2>&1
 
@@ -55,9 +65,6 @@ install_dependencies() {
 
         # Добавление репозитория Docker
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-        # Обновление списка пакетов
-        sudo apt update -y >/dev/null 2>&1
 
         # Установка Docker Engine и Docker Compose plugin
         sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1

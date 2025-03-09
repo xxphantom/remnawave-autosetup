@@ -61,29 +61,61 @@ draw_info_box() {
     echo -e "${NC}"
 }
 
-# Генерация надежного пароля
 generate_secure_password() {
-    local length=${1:-16}
-    local chars='a-zA-Z0-9!#$%^&*()_+.,'
-    
-    local special_chars='!#$%^&*()_+.,'
-    local special_char=$(echo "$special_chars" | fold -w1 | shuf | head -n1)
-    
-    if command -v openssl &> /dev/null; then
-        password=$(openssl rand -base64 $((length * 3/4)) | tr -dc "$chars" | head -c $((length-1)))
-    elif command -v tr &> /dev/null && command -v head &> /dev/null; then
-        password=$(head -c100 /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+    local length="${1:-16}"
+    # Пул символов: буквы, цифры и только перечисленные спецсимволы
+    local chars='a-zA-Z0-9!$%^&*_+.,'
+    local password=""
+
+    # Проверяем, есть ли openssl
+    if command -v openssl &>/dev/null; then
+        password="$(openssl rand -base64 48 \
+            | tr -dc "$chars" \
+            | head -c "$length")"
     else
-        password=$(cat /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+        # Если openssl недоступен, fallback на /dev/urandom
+        password="$(head -c 100 /dev/urandom \
+            | tr -dc "$chars" \
+            | head -c "$length")"
+    fi
+
+    # Проверка наличия символов каждого типа
+    local special_chars='!$%^&*_+.,'
+    local uppercase_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    local lowercase_chars='abcdefghijklmnopqrstuvwxyz'
+    local number_chars='0123456789'
+    
+    # Если нет специального символа, добавляем его
+    if ! [[ "$password" =~ [$special_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_special="$(echo "$special_chars" | fold -w1 | shuf | head -n1)"
+        # Заменяем символ в случайной позиции
+        password="${password:0:$position}${one_special}${password:$((position+1))}"
     fi
     
-    # Добавляем спецсимвол в случайную позицию
-    position=$((RANDOM % length))
-    password="${password:0:$position}${special_char}${password:$position}"
+    # Если нет символа верхнего регистра, добавляем его
+    if ! [[ "$password" =~ [$uppercase_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_uppercase="$(echo "$uppercase_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_uppercase}${password:$((position+1))}"
+    fi
     
-    echo "${password:0:$length}"
-}
+    # Если нет символа нижнего регистра, добавляем его
+    if ! [[ "$password" =~ [$lowercase_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_lowercase="$(echo "$lowercase_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_lowercase}${password:$((position+1))}"
+    fi
+    
+    # Если нет цифры, добавляем её
+    if ! [[ "$password" =~ [$number_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_number="$(echo "$number_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_number}${password:$((position+1))}"
+    fi
 
+    echo "$password"
+}
 
 # Создание общего Makefile для управления сервисами
 create_makefile() {
@@ -102,52 +134,32 @@ logs:
 EOF
 }
 
-# Функция для регистрации пользователя в панели
 register_user() {
-    local domain="$1"
-    local username="$2"
-    local password="$3"
+    local panel_url="$1"
+    local panel_domain="$2"
+    local username="$3"
+    local password="$4"
+    local api_url="http://${panel_url}/api/auth/register"
     
-    if [[ -z "$domain" || -z "$username" || -z "$password" ]]; then
-        echo -e "${BOLD_RED}Ошибка: все параметры (домен, имя пользователя, пароль) обязательны${NC}"
-        return 1
-    fi
-    
-    # Формируем полный URL для регистрации
-    local api_url="https://${domain}/api/auth/register"
-    
-    # Выполняем запрос регистрации
     local response=$(curl -s "$api_url" \
-      -H 'accept: application/json' \
-      -H 'accept-language: en-GB,en;q=0.9,ru;q=0.8,en-US;q=0.7,zh-CN;q=0.6,zh;q=0.5' \
-      -H 'authorization: Bearer' \
-      -H 'cache-control: no-cache' \
-      -H 'content-type: application/json' \
-      -H 'dnt: 1' \
-      -H 'origin: https://'"$domain" \
-      -H 'pragma: no-cache' \
-      -H 'priority: u=1, i' \
-      -H 'sec-ch-ua: "Not(A:Brand";v="99", "Google Chrome";v="133", "Chromium";v="133"' \
-      -H 'sec-ch-ua-mobile: ?0' \
-      -H 'sec-ch-ua-platform: "Windows"' \
-      -H 'sec-fetch-dest: empty' \
-      -H 'sec-fetch-mode: cors' \
-      -H 'sec-fetch-site: same-origin' \
-      -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36' \
-      --data-raw '{"username":"'"$username"'","password":"'"$password"'"}')
+    -H "Host: $panel_domain" \
+    -H "X-Forwarded-For: $panel_url" \
+    -H "X-Forwarded-Proto: https" \
+    -H "Content-Type: application/json" \
+    --data-raw '{"username":"'"$username"'","password":"'"$password"'"}')
     
-    # Проверяем успешность регистрации и извлекаем токен
+	if [ -z "$response" ]; then
+		echo "Ошибка при регистрации - пустой ответ сервера"
+        return 1
+	fi
+
     if [[ "$response" == *"accessToken"* ]]; then
-        # Извлекаем токен из ответа
-        local access_token=$(echo "$response" | grep -o '"accessToken":"[^"]*"' | awk -F'"' '{print $4}')
+    	local token=$(echo "$response" | jq -r '.response.accessToken')
         
-        echo -e "${BOLD_GREEN}Пользователь $username успешно зарегистрирован в панели${NC}"
-        
-        # Возвращаем токен
-        echo "$access_token"
+        echo "$token"
         return 0
     else
-        echo -e "${BOLD_RED}Ошибка при регистрации пользователя: $response${NC}"
+        echo "$response"
         return 1
     fi
 }

@@ -7,6 +7,30 @@
 install_panel() {
     clear
 
+    # Проверка наличия предыдущей установки
+    if [ -d "$REMNAWAVE_DIR" ]; then
+        echo -e "${BOLD_YELLOW}Обнаружена предыдущая установка RemnaWave.${NC}"
+        echo -ne "${ORANGE}Хотите удалить предыдущую установку перед продолжением? (y/n): ${NC}"
+        read REMOVE_PREVIOUS
+        REMOVE_PREVIOUS=$(echo "$REMOVE_PREVIOUS" | tr '[:upper:]' '[:lower:]')
+        echo
+
+        if [ "$REMOVE_PREVIOUS" = "y" ] || [ "$REMOVE_PREVIOUS" = "yes" ]; then
+            echo -e "${BOLD_YELLOW}Удаление предыдущей установки...${NC}"
+            
+            cd $REMNAWAVE_DIR && \
+            docker compose -f panel/docker-compose.yml down 2>/dev/null || true
+            docker compose -f caddy/docker-compose.yml down 2>/dev/null || true
+            docker compose -f remnawave-json/docker-compose.yml down 2>/dev/null || true
+            rm -rf $REMNAWAVE_DIR
+            docker volume rm remnawave-db-data remnawave-redis-data 2>/dev/null || true
+            
+            echo -e "${BOLD_GREEN}Предыдущая установка успешно удалена.${NC}"
+        else
+            echo -e "${BOLD_YELLOW}Продолжаем установку без удаления предыдущей.${NC}"
+        fi
+    fi
+
     # Установка общих зависимостей
     install_dependencies
 
@@ -99,11 +123,17 @@ install_panel() {
     if [ "$password_option" = "1" ]; then
         # Ручной ввод пароля
         while true; do
-            echo -ne "${ORANGE}Введите пароль SuperAdmin: ${NC}"
+            echo -ne "${ORANGE}Введите пароль SuperAdmin (минимум 24 символа, должен содержать буквы разного регистра и цифры): ${NC}"
             stty -echo
             read PASSWORD1
             stty echo
             echo
+
+            # Проверка длины пароля
+            if [ ${#PASSWORD1} -lt 24 ]; then
+                echo -e "${BOLD_RED}Пароль должен содержать не менее 24 символов. Пожалуйста, попробуйте снова.${NC}"
+                continue
+            fi
 
             echo -ne "${BOLD_RED}Повторно введите пароль SuperAdmin для подтверждения: ${NC}"
             stty -echo
@@ -120,7 +150,7 @@ install_panel() {
         done
     else
         # Автоматическая генерация пароля
-        SUPERADMIN_PASSWORD=$(generate_secure_password 16)
+        SUPERADMIN_PASSWORD=$(generate_secure_password 25)
         echo -e "${BOLD_GREEN}Сгенерирован надежный пароль: ${BOLD_RED}$SUPERADMIN_PASSWORD${NC}"
         echo -e "${ORANGE}Обязательно сохраните этот пароль в надежном месте!${NC}"
         echo
@@ -135,19 +165,32 @@ install_panel() {
     sed -i "s|SUB_SUPPORT_URL=https://support.example.com|SUB_SUPPORT_URL=https://$SUB_SUPPORT_DOMAIN|" .env
     sed -i "s|SUB_WEBPAGE_URL=https://example.com|SUB_WEBPAGE_URL=https://$SUB_WEBPAGE_DOMAIN|" .env
     sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
-    # sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
-    # sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
     sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@remnawave-db:5432/$DB_NAME|" .env
     sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=$DB_USER|" .env
     sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
     sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=$DB_NAME|" .env
     sed -i "s|METRICS_PASS=.*|METRICS_PASS=$METRICS_PASS|" .env
 
-    echo -e "${GREEN}Файл .env успешно настроен.${NC}"
+    # Обрабатываем superadmin username и password - добавляем или обновляем переменные
+    if grep -q "^SUPERADMIN_USERNAME=" .env; then
+        sed -i "s|^SUPERADMIN_USERNAME=.*|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
+    else
+        echo "SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME" >> .env
+    fi
+
+    if grep -q "^SUPERADMIN_PASSWORD=" .env; then
+        sed -i "s|^SUPERADMIN_PASSWORD=.*|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
+    else
+        echo "SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD" >> .env
+    fi
+
     sleep 3
 
     # Создаем docker-compose.yml для панели
     curl -s -o docker-compose.yml https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/docker-compose-prod.yml
+
+    # Меняем образ на dev
+    sed -i "s|image: remnawave/backend:latest|image: remnawave/backend:dev|" docker-compose.yml
 
     # Создаем Makefile
     create_makefile "$REMNAWAVE_DIR/panel"
@@ -208,16 +251,23 @@ install_panel() {
         fi
     fi
 
-
     # Регистрация пользователя и получение токена
-    ACCESS_TOKEN=$(register_panel_user $PANEL_DOMAIN $SUPERADMIN_USERNAME $SUPERADMIN_PASSWORD)
+    local reg_result=$(register_user "127.0.0.1:3000" "$SCRIPT_PANEL_DOMAIN" "$SUPERADMIN_USERNAME" "$SUPERADMIN_PASSWORD")
+    local reg_status=$?
+    
+    if [ $reg_status -eq 0 ]; then
+        echo -e "${GREEN}✓ Регистрация пользователя выполнена успешно${NC}"
+        echo -e "${GRAY}Получен токен доступа:${NC}"
+        echo
+        echo -e "${GRAY}$reg_result${NC}"
+        mkdir -p ~/remnawave/panel
+        echo -e "$reg_result" > ~/remnawave/panel/api_token.txt
+        echo
+        echo -e "${GRAY}Токен сохранен в файл ~/remnawave/panel/api_token.txt. Он потребуется для установки ноды.${NC}"
 
-    if [ -z "$ACCESS_TOKEN" ]; then
-        echo -e "${BOLD_RED}Ошибка при регистрации пользователя. Проверьте введенные данные.${NC}"
-        exit 1
     else
-        echo -e "${BOLD_GREEN}Пользователь успешно зарегистрирован!${NC}"
-        echo -e "${BOLD_YELLOW}Токен доступа по API:${NC} $ACCESS_TOKEN"
+        echo -e "${RED}✗ Ошибка при регистрации пользователя${NC}"
+        echo -e "${GRAY}Ответ сервера: $reg_result${NC}"
     fi
 
     display_panel_installation_complete_message

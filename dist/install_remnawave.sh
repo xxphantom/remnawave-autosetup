@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Remnawave Installer (модульная версия)
-# Собрано: Sun Mar  9 10:59:02 MSK 2025
+# Собрано: Sun Mar  9 20:19:26 MSK 2025
 
 # Включение модуля: common.sh
 
@@ -66,29 +66,61 @@ draw_info_box() {
     echo -e "${NC}"
 }
 
-# Генерация надежного пароля
 generate_secure_password() {
-    local length=${1:-16}
-    local chars='a-zA-Z0-9!#$%^&*()_+.,'
-    
-    local special_chars='!#$%^&*()_+.,'
-    local special_char=$(echo "$special_chars" | fold -w1 | shuf | head -n1)
-    
-    if command -v openssl &> /dev/null; then
-        password=$(openssl rand -base64 $((length * 3/4)) | tr -dc "$chars" | head -c $((length-1)))
-    elif command -v tr &> /dev/null && command -v head &> /dev/null; then
-        password=$(head -c100 /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+    local length="${1:-16}"
+    # Пул символов: буквы, цифры и только перечисленные спецсимволы
+    local chars='a-zA-Z0-9!$%^&*_+.,'
+    local password=""
+
+    # Проверяем, есть ли openssl
+    if command -v openssl &>/dev/null; then
+        password="$(openssl rand -base64 48 \
+            | tr -dc "$chars" \
+            | head -c "$length")"
     else
-        password=$(cat /dev/urandom | tr -dc "$chars" | head -c $((length-1)))
+        # Если openssl недоступен, fallback на /dev/urandom
+        password="$(head -c 100 /dev/urandom \
+            | tr -dc "$chars" \
+            | head -c "$length")"
+    fi
+
+    # Проверка наличия символов каждого типа
+    local special_chars='!$%^&*_+.,'
+    local uppercase_chars='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    local lowercase_chars='abcdefghijklmnopqrstuvwxyz'
+    local number_chars='0123456789'
+    
+    # Если нет специального символа, добавляем его
+    if ! [[ "$password" =~ [$special_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_special="$(echo "$special_chars" | fold -w1 | shuf | head -n1)"
+        # Заменяем символ в случайной позиции
+        password="${password:0:$position}${one_special}${password:$((position+1))}"
     fi
     
-    # Добавляем спецсимвол в случайную позицию
-    position=$((RANDOM % length))
-    password="${password:0:$position}${special_char}${password:$position}"
+    # Если нет символа верхнего регистра, добавляем его
+    if ! [[ "$password" =~ [$uppercase_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_uppercase="$(echo "$uppercase_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_uppercase}${password:$((position+1))}"
+    fi
     
-    echo "${password:0:$length}"
-}
+    # Если нет символа нижнего регистра, добавляем его
+    if ! [[ "$password" =~ [$lowercase_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_lowercase="$(echo "$lowercase_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_lowercase}${password:$((position+1))}"
+    fi
+    
+    # Если нет цифры, добавляем её
+    if ! [[ "$password" =~ [$number_chars] ]]; then
+        local position=$((RANDOM % length))
+        local one_number="$(echo "$number_chars" | fold -w1 | shuf | head -n1)"
+        password="${password:0:$position}${one_number}${password:$((position+1))}"
+    fi
 
+    echo "$password"
+}
 
 # Создание общего Makefile для управления сервисами
 create_makefile() {
@@ -105,6 +137,36 @@ restart:
 logs:
 	docker compose logs -f -t
 EOF
+}
+
+register_user() {
+    local panel_url="$1"
+    local panel_domain="$2"
+    local username="$3"
+    local password="$4"
+    local api_url="http://${panel_url}/api/auth/register"
+    
+    local response=$(curl -s "$api_url" \
+    -H "Host: $panel_domain" \
+    -H "X-Forwarded-For: $panel_url" \
+    -H "X-Forwarded-Proto: https" \
+    -H "Content-Type: application/json" \
+    --data-raw '{"username":"'"$username"'","password":"'"$password"'"}')
+    
+	if [ -z "$response" ]; then
+		echo "Ошибка при регистрации - пустой ответ сервера"
+        return 1
+	fi
+
+    if [[ "$response" == *"accessToken"* ]]; then
+    	local token=$(echo "$response" | jq -r '.response.accessToken')
+        
+        echo "$token"
+        return 0
+    else
+        echo "$response"
+        return 1
+    fi
 }
 
 # Включение модуля: ui.sh
@@ -150,29 +212,40 @@ draw_info_box() {
 
 # Включение модуля: dependencies.sh
 
-# Установка общих зависимостей для всех компонентов
+# Функция для проверки и установки зависимостей
+check_and_install_dependency() {
+    local packages=("$@")
+    local failed=false
+    
+    for package_name in "${packages[@]}"; do
+        if ! command -v $package_name &>/dev/null; then
+            echo -e "${GREEN}Установка пакета $package_name...${NC}"
+            sudo apt install -y $package_name >/dev/null 2>&1
+            if ! command -v $package_name &>/dev/null; then
+                echo -e "${BOLD_RED}Ошибка: Не удалось установить $package_name. Пожалуйста, установите его вручную.${NC}"
+                echo -e "${BOLD_RED}Для работы скрипта требуется пакет $package_name.${NC}"
+                sleep 2
+                failed=true
+            else
+                echo -e "${GREEN}Пакет $package_name успешно установлен.${NC}"
+            fi
+        fi
+    done
+    
+    if [ "$failed" = true ]; then
+        return 1
+    fi
+    return 0
+}
 
+# Установка общих зависимостей для всех компонентов
 install_dependencies() {
     echo -e "${GREEN}Проверка зависимостей...${NC}"
+    sudo apt update >/dev/null 2>&1
 
-    # Проверка и установка утилиты make
-    check_and_install_make() {
-        if ! command -v make &>/dev/null; then
-            echo -e "${GREEN}Установка утилиты make...${NC}"
-            sudo apt update >/dev/null 2>&1
-            sudo apt install -y make >/dev/null 2>&1
-            if ! command -v make &>/dev/null; then
-                echo -e "${BOLD_RED}Ошибка: Не удалось установить make. Пожалуйста, установите его вручную.${NC}"
-                return 1
-            fi
-            echo -e "${GREEN}Утилита make успешно установлена.${NC}"
-        fi
-        return 0
-    }
-
-    check_and_install_make || {
-        echo -e "${BOLD_RED}Ошибка: Для настройки сайта заглушки требуется утилита make. Пожалуйста, установите его вручную.${NC}"
-        sleep 2
+    # Проверка и установка необходимых пакетов
+    check_and_install_dependency "curl" "jq" "make" || {
+        echo -e "${BOLD_RED}Ошибка: Не все необходимые зависимости были установлены.${NC}"
         return 1
     }
 
@@ -183,7 +256,6 @@ install_dependencies() {
         echo ""
         echo -e "${GREEN}Установка Docker и других необходимых пакетов...${NC}"
 
-        sudo apt update -y >/dev/null 2>&1
         # Установка предварительных зависимостей
         sudo apt install -y apt-transport-https ca-certificates curl software-properties-common make >/dev/null 2>&1
 
@@ -205,9 +277,6 @@ install_dependencies() {
 
         # Добавление репозитория Docker
         echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${CODENAME} stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-
-        # Обновление списка пакетов
-        sudo apt update -y >/dev/null 2>&1
 
         # Установка Docker Engine и Docker Compose plugin
         sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1
@@ -259,6 +328,7 @@ setup_remnawave_json() {
         V2RAY_TEMPLATE_PATH_LINE="V2RAY_TEMPLATE_PATH=/app/templates/v2ray/default.json"
 
         # V2RAY_MUX_ENABLED
+        echo ""
         echo -ne "${ORANGE}V2RAY_MUX_ENABLED - флаг для включения или отключения функции V2Ray Mux.${NC}\\n"
         echo -ne "${ORANGE}Включить функцию V2Ray Mux? (y/n, по умолчанию y): ${NC}"
         read ENABLE_V2RAY_MUX
@@ -400,9 +470,11 @@ volumes:
   caddy_config_panel:
 EOF
 
-    # Создание Makefile для Caddy
+    # Создание Makefile
     create_makefile "$REMNAWAVE_DIR/caddy"
 
+    # Создание директории для логов
+    mkdir -p $REMNAWAVE_DIR/caddy/logs
 }
 
 # Включение модуля: ui.sh
@@ -460,6 +532,30 @@ display_panel_installation_complete_message() {
 install_panel() {
     clear
 
+    # Проверка наличия предыдущей установки
+    if [ -d "$REMNAWAVE_DIR" ]; then
+        echo -e "${BOLD_YELLOW}Обнаружена предыдущая установка RemnaWave.${NC}"
+        echo -ne "${ORANGE}Хотите удалить предыдущую установку перед продолжением? (y/n): ${NC}"
+        read REMOVE_PREVIOUS
+        REMOVE_PREVIOUS=$(echo "$REMOVE_PREVIOUS" | tr '[:upper:]' '[:lower:]')
+        echo
+
+        if [ "$REMOVE_PREVIOUS" = "y" ] || [ "$REMOVE_PREVIOUS" = "yes" ]; then
+            echo -e "${BOLD_YELLOW}Удаление предыдущей установки...${NC}"
+            
+            cd $REMNAWAVE_DIR && \
+            docker compose -f panel/docker-compose.yml down 2>/dev/null || true
+            docker compose -f caddy/docker-compose.yml down 2>/dev/null || true
+            docker compose -f remnawave-json/docker-compose.yml down 2>/dev/null || true
+            rm -rf $REMNAWAVE_DIR
+            docker volume rm remnawave-db-data remnawave-redis-data 2>/dev/null || true
+            
+            echo -e "${BOLD_GREEN}Предыдущая установка успешно удалена.${NC}"
+        else
+            echo -e "${BOLD_YELLOW}Продолжаем установку без удаления предыдущей.${NC}"
+        fi
+    fi
+
     # Установка общих зависимостей
     install_dependencies
 
@@ -473,10 +569,11 @@ install_panel() {
     JWT_AUTH_SECRET=$(openssl rand -hex 32 | tr -d '\n')
     JWT_API_TOKENS_SECRET=$(openssl rand -hex 32 | tr -d '\n')
 
-    # Генерация безопасных учетных данных для базы данных
+    # Генерация безопасных учетных данных
     DB_USER="remnawave_$(openssl rand -hex 4 | tr -d '\n')"
     DB_PASSWORD=$(generate_secure_password 16)
     DB_NAME="remnawave_db"
+    METRICS_PASS=$(generate_secure_password 16)
 
     curl -s -o .env https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/.env.sample
 
@@ -551,11 +648,17 @@ install_panel() {
     if [ "$password_option" = "1" ]; then
         # Ручной ввод пароля
         while true; do
-            echo -ne "${ORANGE}Введите пароль SuperAdmin: ${NC}"
+            echo -ne "${ORANGE}Введите пароль SuperAdmin (минимум 24 символа, должен содержать буквы разного регистра и цифры): ${NC}"
             stty -echo
             read PASSWORD1
             stty echo
             echo
+
+            # Проверка длины пароля
+            if [ ${#PASSWORD1} -lt 24 ]; then
+                echo -e "${BOLD_RED}Пароль должен содержать не менее 24 символов. Пожалуйста, попробуйте снова.${NC}"
+                continue
+            fi
 
             echo -ne "${BOLD_RED}Повторно введите пароль SuperAdmin для подтверждения: ${NC}"
             stty -echo
@@ -572,7 +675,7 @@ install_panel() {
         done
     else
         # Автоматическая генерация пароля
-        SUPERADMIN_PASSWORD=$(generate_secure_password 16)
+        SUPERADMIN_PASSWORD=$(generate_secure_password 25)
         echo -e "${BOLD_GREEN}Сгенерирован надежный пароль: ${BOLD_RED}$SUPERADMIN_PASSWORD${NC}"
         echo -e "${ORANGE}Обязательно сохраните этот пароль в надежном месте!${NC}"
         echo
@@ -587,36 +690,47 @@ install_panel() {
     sed -i "s|SUB_SUPPORT_URL=https://support.example.com|SUB_SUPPORT_URL=https://$SUB_SUPPORT_DOMAIN|" .env
     sed -i "s|SUB_WEBPAGE_URL=https://example.com|SUB_WEBPAGE_URL=https://$SUB_WEBPAGE_DOMAIN|" .env
     sed -i "s|SUB_PUBLIC_DOMAIN=example.com|SUB_PUBLIC_DOMAIN=$SCRIPT_SUB_DOMAIN|" .env
-    sed -i "s|SUPERADMIN_USERNAME=change_me|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
-    sed -i "s|SUPERADMIN_PASSWORD=change_me|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
     sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@remnawave-db:5432/$DB_NAME|" .env
     sed -i "s|POSTGRES_USER=.*|POSTGRES_USER=$DB_USER|" .env
     sed -i "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$DB_PASSWORD|" .env
     sed -i "s|POSTGRES_DB=.*|POSTGRES_DB=$DB_NAME|" .env
+    sed -i "s|METRICS_PASS=.*|METRICS_PASS=$METRICS_PASS|" .env
 
-    echo -e "${GREEN}Файл .env успешно настроен.${NC}"
+    # Обрабатываем superadmin username и password - добавляем или обновляем переменные
+    if grep -q "^SUPERADMIN_USERNAME=" .env; then
+        sed -i "s|^SUPERADMIN_USERNAME=.*|SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME|" .env
+    else
+        echo "SUPERADMIN_USERNAME=$SUPERADMIN_USERNAME" >> .env
+    fi
+
+    if grep -q "^SUPERADMIN_PASSWORD=" .env; then
+        sed -i "s|^SUPERADMIN_PASSWORD=.*|SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD|" .env
+    else
+        echo "SUPERADMIN_PASSWORD=$SUPERADMIN_PASSWORD" >> .env
+    fi
+
     sleep 3
 
     # Создаем docker-compose.yml для панели
     curl -s -o docker-compose.yml https://raw.githubusercontent.com/remnawave/backend/refs/heads/dev/docker-compose-prod.yml
 
+    # Меняем образ на dev
+    sed -i "s|image: remnawave/backend:latest|image: remnawave/backend:dev|" docker-compose.yml
+
     # Создаем Makefile
     create_makefile "$REMNAWAVE_DIR/panel"
 
-# ===================================================================================
-# Установка и настройка remnawave-json
-# ===================================================================================
+    # ===================================================================================
+    # Установка и настройка remnawave-json
+    # ===================================================================================
 
     setup_remnawave_json
 
-# ===================================================================================
-# Установка и настройка Caddy для панели и подписок
-# ===================================================================================
+    # ===================================================================================
+    # Установка и настройка Caddy для панели и подписок
+    # ===================================================================================
 
     setup_caddy_for_panel
-
-    # Создание директории для логов
-    mkdir -p $REMNAWAVE_DIR/caddy/logs
 
     # Запуск всех контейнеров
     echo -e "${BOLD_GREEN}Запуск контейнеров...${NC}"
@@ -662,6 +776,25 @@ install_panel() {
         fi
     fi
 
+    # Регистрация пользователя и получение токена
+    local reg_result=$(register_user "127.0.0.1:3000" "$SCRIPT_PANEL_DOMAIN" "$SUPERADMIN_USERNAME" "$SUPERADMIN_PASSWORD")
+    local reg_status=$?
+    
+    if [ $reg_status -eq 0 ]; then
+        echo -e "${GREEN}✓ Регистрация пользователя выполнена успешно${NC}"
+        echo -e "${GRAY}Получен токен доступа:${NC}"
+        echo
+        echo -e "${GRAY}$reg_result${NC}"
+        mkdir -p ~/remnawave/panel
+        echo -e "$reg_result" > ~/remnawave/panel/api_token.txt
+        echo
+        echo -e "${GRAY}Токен сохранен в файл ~/remnawave/panel/api_token.txt. Он потребуется для установки ноды.${NC}"
+
+    else
+        echo -e "${RED}✗ Ошибка при регистрации пользователя${NC}"
+        echo -e "${GRAY}Ответ сервера: $reg_result${NC}"
+    fi
+
     display_panel_installation_complete_message
 }
 
@@ -673,7 +806,28 @@ install_panel() {
 
 setup_node() {
     clear
-    
+   
+       # Проверка наличия предыдущей установки
+    if [ -d "$REMNANODE_DIR" ]; then
+        echo -e "${BOLD_YELLOW}Обнаружена предыдущая установка RemnaWave Node.${NC}"
+        echo -ne "${ORANGE}Хотите удалить предыдущую установку перед продолжением? (y/n): ${NC}"
+        read REMOVE_PREVIOUS
+        REMOVE_PREVIOUS=$(echo "$REMOVE_PREVIOUS" | tr '[:upper:]' '[:lower:]')
+        echo
+
+        if [ "$REMOVE_PREVIOUS" = "y" ] || [ "$REMOVE_PREVIOUS" = "yes" ]; then
+            echo -e "${BOLD_YELLOW}Удаление предыдущей установки...${NC}"
+            
+            cd $REMNANODE_DIR && \
+            docker compose -f docker-compose.yml down 2>/dev/null || true
+            rm -rf $REMNANODE_DIR
+            
+            echo -e "${BOLD_GREEN}Предыдущая установка успешно удалена.${NC}"
+        else
+            echo -e "${BOLD_YELLOW}Продолжаем установку без удаления предыдущей.${NC}"
+        fi
+    fi
+
     # Установка общих зависимостей
     install_dependencies
     
@@ -720,7 +874,30 @@ setup_node() {
     
     draw_info_box "Панель Remnawave" "Установка ноды завершена"
     
-    display_node_installation_complete_message
+    if [ "$NODE_STATUS" = "running" ]; then
+        echo -e "${BOLD_GREEN}✓ Нода Remnawave успешно установлена и запущена!${NC}"
+        echo -e "${LIGHT_GREEN}• Порт ноды: ${BOLD_GREEN}$NODE_PORT${NC}"
+        echo -e "${LIGHT_GREEN}• Директория ноды: ${BOLD_GREEN}$REMNANODE_DIR${NC}"
+        echo -e "\n${LIGHT_GREEN}Для управления нодой используйте следующие команды:${NC}"
+        echo -e "${ORANGE}   cd $REMNANODE_DIR${NC}"
+        echo -e "${ORANGE}   make start   ${NC}- Запуск ноды и просмотр логов"
+        echo -e "${ORANGE}   make stop    ${NC}- Остановка ноды"
+        echo -e "${ORANGE}   make restart ${NC}- Перезапуск ноды"
+        echo -e "${ORANGE}   make logs    ${NC}- Просмотр логов ноды"
+    else
+        echo -e "${BOLD_RED}⚠ Нода Remnawave была установлена, но не запущена автоматически.${NC}"
+        echo -e "${LIGHT_RED}Для запуска ноды вручную выполните:${NC}"
+        echo -e "${ORANGE}   cd $REMNANODE_DIR${NC}"
+        echo -e "${ORANGE}   make start${NC}"
+        echo -e "\n${LIGHT_RED}Если ошибка сохраняется, проверьте логи:${NC}"
+        echo -e "${ORANGE}   make logs${NC}"
+    fi
+    
+    unset NODE_PORT
+    
+    echo -e "\n${BOLD_GREEN}Нажмите Enter, чтобы вернуться в главное меню...${NC}"
+    read -r
+
 }
 
 # Включение модуля: selfsteal.sh

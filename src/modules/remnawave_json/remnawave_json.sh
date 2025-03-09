@@ -32,6 +32,7 @@ setup_remnawave_json() {
         V2RAY_TEMPLATE_PATH_LINE="V2RAY_TEMPLATE_PATH=/app/templates/v2ray/default.json"
 
         # V2RAY_MUX_ENABLED
+        echo ""
         echo -ne "${ORANGE}V2RAY_MUX_ENABLED - флаг для включения или отключения функции V2Ray Mux.${NC}\\n"
         echo -ne "${ORANGE}Включить функцию V2Ray Mux? (y/n, по умолчанию y): ${NC}"
         read ENABLE_V2RAY_MUX
